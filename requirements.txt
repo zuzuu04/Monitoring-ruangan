@@ -1,3 +1,5 @@
-streamlit
+scikit-learn
 pandas
+matplotlib
+requests
 streamlit-option-menu
