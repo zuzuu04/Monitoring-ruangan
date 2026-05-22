@@ -2,11 +2,20 @@ import streamlit as st
 import pandas as pd
 import time
 from streamlit_option_menu import option_menu
+import requests
 
-# --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Sistem Monitoring Ruangan", layout="wide")
+# --- 0. KONFIGURASI HALAMAN (SOLUSI LAYOUT BERANTAKANN) ---
+# Memaksa halaman menggunakan wide mode agar kolom tetap sejajar ke samping
+st.set_page_config(layout="wide")
 
-# --- 2. CUSTOM CSS ---
+# --- IMPORT LIBRARY ML ---
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+import matplotlib.pyplot as plt
+
+# --- 1. KONFIGURASI URL FIREBASE REALTIME DATABASE ---
+FIREBASE_URL = "https://monitoringruangan-16163-default-rtdb.asia-southeast1.firebasedatabase.app"
+
+# --- 3. CUSTOM CSS ---
 st.markdown("""
     <style>
     div[data-testid="stVerticalBlockBorderWrapper"] {
@@ -29,7 +38,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. FUNGSI ALUR DECISION TREE ---
+# --- 4. FUNGSI ALUR VISUALISASI ---
 def render_alur_dt(s, l, g, p):
     st_suhu = "NORMAL" if s <= 30 else "PANAS"
     st_lembab = "NORMAL" if l <= 70 else "LEMBAP"
@@ -53,7 +62,7 @@ def render_alur_dt(s, l, g, p):
         </div>
     """, unsafe_allow_html=True)
 
-# --- 4. SIDEBAR ---
+# --- 5. SIDEBAR ---
 with st.sidebar:
     st.markdown("### 🎓 Skripsi IoT")
     st.write("Anesya Gendisty M.")
@@ -69,35 +78,98 @@ with st.sidebar:
         }
     )
 
-# --- 5. MOCKUP DATA ---
-suhu, kelembapan, gas_co = 26.5, 55, 120
-gerakan, status_sistem = "Terdeteksi", "ONLINE"
+# --- 6. MEMBACA DATA REAL-TIME DARI FIREBASE ---
+error_msg = ""
+suhu, kelembapan, gas_co, gerakan = 26.5, 55.0, 120.0, "Terdeteksi"
 
-# --- 6. LOGIKA HALAMAN ---
+try:
+    response = requests.get(f"{FIREBASE_URL}/Data_Sensor.json", timeout=5)
+    if response.status_code == 200:
+        data_firebase = response.json()
+        if data_firebase is not None:
+            suhu = float(data_firebase.get("Suhu", 25.0))
+            kelembapan = float(data_firebase.get("Kelembapan", 60.0))
+            gas_co = float(data_firebase.get("Gas_PPM", 100.0))
+            pir_status = int(data_firebase.get("Gerakan_PIR", 0))
+            gerakan = "Terdeteksi" if pir_status == 1 else "Tidak Terdeteksi"
+            status_sistem = "ONLINE"
+        else:
+            status_sistem = "FIREBASE EMPTY"
+    else:
+        status_sistem = "HTTP ERROR"
+        error_msg = f"Status Code: {response.status_code} (Cek Rules Firebase Anda!)"
+except Exception as e:
+    status_sistem = "DISCONNECTED"
+    error_msg = str(e)
+
+# --- 7. LOGIKA SINKRONISASI HALAMAN ---
 if menu == "Dashboard Utama":
     st.title("🏠 Dashboard Monitoring")
     st.subheader("Implementasi Decision Tree C4.5")
     
+    if error_msg:
+        st.error(f"Detail Error Firebase: {error_msg}")
+
+    # === PROSES TRAINING MACHINE LEARNING ===
+    try:
+        df_train = pd.read_csv("data_dummy_sensor_kipas.csv")
+        X = df_train[['Suhu_DHT22', 'Kelembapan_DHT22', 'PPM_MQ135', 'Gerakan_PIR']]
+        y = df_train['Status_Kipas']
+        
+        model_dt = DecisionTreeClassifier(criterion='entropy', max_depth=3, random_state=42)
+        model_dt.fit(X, y)
+        data_ready = True
+    except FileNotFoundError:
+        data_ready = False
+        st.error("Nes, pastiin file 'data_dummy_sensor_kipas.csv' udah satu folder sama app.py ya!")
+
+    # Pembagian kolom layout yang kokoh di wide mode
     col1, col2 = st.columns([1, 2.3])
     
     with col1:
         with st.container(border=True):
             st.markdown("### 📡 Status Sistem")
-            st.metric(label="Konektivitas", value=status_sistem, delta="Normal")
+            st.metric(label="Konektivitas Firebase", value=status_sistem, delta="Live Stream")
             st.caption(f"Update: {time.strftime('%H:%M:%S')} WIB")
+            if st.button("🔄 Ambil Data Terbaru"):
+                st.rerun()
 
     with col2:
         with st.container(border=True):
             st.markdown("### 🧠 Proses Prediksi Decision Tree (C4.5)")
             render_alur_dt(suhu, kelembapan, gas_co, gerakan)
-            if suhu <= 30 and gas_co <= 200:
-                st.success("✅ STATUS: RUANGAN AMAN / NYAMAN")
+            
+            if data_ready:
+                input_pir_numeric = 1 if gerakan == "Terdeteksi" else 0
+                input_data = [[suhu, kelembapan, gas_co, input_pir_numeric]]
+                hasil_prediksi = model_dt.predict(input_data)[0]
+                
+                if hasil_prediksi == "NYALA":
+                    st.error("⚠️ STATUS AI: KIPAS NYALA (Butuh Pendinginan / Sirkulasi)")
+                    try: requests.patch(f"{FIREBASE_URL}/Control_Perangkat.json", json={"Kipas": "NYALA"}, timeout=3)
+                    except: pass
+                else:
+                    st.success("✅ STATUS AI: KIPAS MATI (Ruangan Aman & Adem)")
+                    try: requests.patch(f"{FIREBASE_URL}/Control_Perangkat.json", json={"Kipas": "MATI"}, timeout=3)
+                    except: pass
             else:
-                st.error("⚠️ STATUS: RUANGAN BAHAYA / TIDAK NYAMAN")
+                st.warning("Model belum bisa memprediksi karena file CSV tidak ditemukan.")
 
     st.divider()
 
-    st.write("### 📡 Parameter Sensor Real-Time")
+    if data_ready:
+        st.write("### 🌳 Hasil Training: Struktur Pohon Keputusan Asli")
+        with st.container(border=True):
+            fig, ax = plt.subplots(figsize=(12, 5))
+            plot_tree(model_dt, 
+                      feature_names=['Suhu', 'Lembap', 'Gas_PPM', 'PIR'], 
+                      class_names=model_dt.classes_, 
+                      filled=True, 
+                      rounded=True, 
+                      ax=ax)
+            st.pyplot(fig)
+
+    st.write("### 📡 Parameter Sensor Real-Time (Data Firebase)")
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         with st.container(border=True):
@@ -121,25 +193,28 @@ if menu == "Dashboard Utama":
 
     with st.container(border=True):
         st.write("### 📈 Tren Data Sensor")
-        chart_data = pd.DataFrame({"Waktu": ["1h", "2h", "3h", "4h", "5h", "6h"], "Suhu": [24, 25, 26, 25.5, 26, 26.5]})
+        chart_data = pd.DataFrame({"Waktu": ["1h", "2h", "3h", "4h", "5h", "6h"], "Suhu": [24, 25, 26, 25.5, 26, suhu]})
         st.line_chart(chart_data.set_index("Waktu"))
 
-# --- MENU LAIN ---
 elif menu == "Statistik Data":
     st.title("📊 Statistik & History")
     with st.container(border=True):
-        st.write("Database hasil record sensor.")
-        st.table(pd.DataFrame({"Waktu": ["14:30"], "Suhu": [26.5], "Prediksi": ["Aman"]}))
+        st.write("### 🗄️ Dataset Training Decision Tree")
+        try:
+            df_dummy = pd.read_csv("data_dummy_sensor_kipas.csv")
+            st.dataframe(df_dummy)
+        except FileNotFoundError:
+            st.error("File 'data_dummy_sensor_kipas.csv' tidak ditemukan di folder project.")
 
 elif menu == "Status Perangkat":
     st.title("💻 Hardware Monitoring")
     with st.container(border=True):
-        st.json({"Device": "ESP32", "IP": "192.168.1.7", "RSSI": "-65 dBm"})
+        st.json({"Device": "ESP32", "Database_Connected": True, "Location": "Singapore-Node"})
 
 elif menu == "Log Aktivitas":
     st.title("📝 Activity Logs")
     with st.container(border=True):
-        st.code("14:30:05 - Gas Tinggi - Relay ON")
+        st.code(f"{time.strftime('%H:%M:%S')} - Model Evaluated - Decision Tree Prediction Running")
 
 elif menu == "Pengaturan":
     st.title("⚙️ Konfigurasi Threshold")
