@@ -6,7 +6,7 @@ import requests
 
 # --- 0. KONFIGURASI HALAMAN (SOLUSI LAYOUT BERANTAKANN) ---
 # Memaksa halaman menggunakan wide mode agar kolom tetap sejajar ke samping
-st.set_page_config(layout="wide")
+st.set_page_config(layout="wide", page_title="Dashboard Monitoring Room")
 
 # --- IMPORT LIBRARY ML ---
 from sklearn.tree import DecisionTreeClassifier, plot_tree
@@ -42,7 +42,7 @@ st.markdown("""
 def render_alur_dt(s, l, g, p):
     st_suhu = "NORMAL" if s <= 30 else "PANAS"
     st_lembab = "NORMAL" if l <= 70 else "LEMBAP"
-    st_gas = "AMAN" if g <= 200 else "BAHAYA"
+    st_gas = "AMAN" if g <= 300 else "BAHAYA"
     st_pir = "ADA ORANG" if p == "Terdeteksi" else "KOSONG"
 
     c_suhu = "#2E5A88" if st_suhu == "NORMAL" else "#D9534F"
@@ -64,8 +64,8 @@ def render_alur_dt(s, l, g, p):
 
 # --- 5. SIDEBAR ---
 with st.sidebar:
-    st.markdown("### 🎓 Skripsi IoT")
-    st.write("Anesya Gendisty M.")
+    st.markdown("### Monitoring Ruang Keluarga")
+    st.write("Diss")
     st.divider()
     menu = option_menu(
         menu_title="Main Menu",
@@ -110,10 +110,12 @@ if menu == "Dashboard Utama":
     if error_msg:
         st.error(f"Detail Error Firebase: {error_msg}")
 
-    # === PROSES TRAINING MACHINE LEARNING ===
+    # === PROSES TRAINING MACHINE LEARNING (DIPERBAIKI UNTUK 2 SENSOR) ===
     try:
-        df_train = pd.read_csv("data_dummy_sensor_kipas.csv")
-        X = df_train[['Suhu_DHT22', 'Kelembapan_DHT22', 'PPM_MQ135', 'Gerakan_PIR']]
+        # Membaca dataset hasil panen asli lo Nes
+        df_train = pd.read_csv("data/dataset_sensor_skripsi.csv")
+        # Mengunci fitur sesuai kolom CSV asli saat ini
+        X = df_train[['Gas_PPM', 'Gerakan_PIR']]
         y = df_train['Status_Kipas']
         
         model_dt = DecisionTreeClassifier(criterion='entropy', max_depth=3, random_state=42)
@@ -121,7 +123,7 @@ if menu == "Dashboard Utama":
         data_ready = True
     except FileNotFoundError:
         data_ready = False
-        st.error("Nes, pastiin file 'data_dummy_sensor_kipas.csv' udah satu folder sama app.py ya!")
+        st.error("Nes, pastiin file 'dataset_sensor_skripsi.csv' udah ada di folder yang sama dengan app.py ya!")
 
     # Pembagian kolom layout yang kokoh di wide mode
     col1, col2 = st.columns([1, 2.3])
@@ -141,7 +143,8 @@ if menu == "Dashboard Utama":
             
             if data_ready:
                 input_pir_numeric = 1 if gerakan == "Terdeteksi" else 0
-                input_data = [[suhu, kelembapan, gas_co, input_pir_numeric]]
+                # Prediksi cuma pakai 2 data sensor yang sudah ditarik real-time
+                input_data = [[gas_co, input_pir_numeric]]
                 hasil_prediksi = model_dt.predict(input_data)[0]
                 
                 if hasil_prediksi == "NYALA":
@@ -160,9 +163,10 @@ if menu == "Dashboard Utama":
     if data_ready:
         st.write("### 🌳 Hasil Training: Struktur Pohon Keputusan Asli")
         with st.container(border=True):
-            fig, ax = plt.subplots(figsize=(12, 5))
+            fig, ax = plt.subplots(figsize=(12, 4))
+            # Plot tree disesuaikan dengan 2 fitur asli
             plot_tree(model_dt, 
-                      feature_names=['Suhu', 'Lembap', 'Gas_PPM', 'PIR'], 
+                      feature_names=['Gas_PPM', 'PIR'], 
                       class_names=model_dt.classes_, 
                       filled=True, 
                       rounded=True, 
@@ -191,20 +195,62 @@ if menu == "Dashboard Utama":
             else:
                 st.markdown("<h3 style='color: gray; text-align: center;'>⚪ SEPI</h3>", unsafe_allow_html=True)
 
-    with st.container(border=True):
-        st.write("### 📈 Tren Data Sensor")
-        chart_data = pd.DataFrame({"Waktu": ["1h", "2h", "3h", "4h", "5h", "6h"], "Suhu": [24, 25, 26, 25.5, 26, suhu]})
-        st.line_chart(chart_data.set_index("Waktu"))
+# === 📈 TREN DATA SENSOR INTERAKTIF (REAL-TIME) ===
+    st.write("### 📈 Tren Data Sensor Real-Time")
+    
+    # 1. Inisialisasi tempat penyimpanan data di memori browser jika belum ada
+    if "df_history" not in st.session_state:
+        st.session_state.df_history = pd.DataFrame(columns=["Waktu", "Suhu (°C)", "Kelembapan (%)", "Gas (PPM)", "PIR"])
+
+    # 2. Ambil waktu sekarang untuk sumbu X
+    waktu_sekarang = time.strftime('%H:%M:%S')
+
+    # 3. Masukkan data real-time Firebase saat ini ke dalam tabel memori
+    data_baru = pd.DataFrame([{
+        "Waktu": waktu_sekarang,
+        "Suhu (°C)": suhu,
+        "Kelembapan (%)": kelembapan,
+        "Gas (PPM)": gas_co,
+        "PIR": 1 if gerakan == "Terdeteksi" else 0
+    }])
+    
+    # Gabungkan data baru ke data riwayat sebelumnya
+    st.session_state.df_history = pd.concat([st.session_state.df_history, data_baru], ignore_index=True)
+
+    # Batasi riwayat data yang tampil di grafik (maksimal 20 data terakhir)
+    if len(st.session_state.df_history) > 20:
+        st.session_state.df_history = st.session_state.df_history.iloc[1:].reset_index(drop=True)
+
+    # 4. PECAH JADI 2 KOLOM GRAFIK BEDA SKALA
+    kolom_grafik1, kolom_grafik2 = st.columns(2)
+
+    with kolom_grafik1:
+        with st.container(border=True):
+            st.markdown("#### 💨 Tren Sensor Gas MQ135")
+            # Cuma nampilin kolom Waktu dan Gas (PPM)
+            data_gas = st.session_state.df_history[["Waktu", "Gas (PPM)"]].set_index("Waktu")
+            st.line_chart(data_gas, color="#4A90E2")
+
+    with kolom_grafik2:
+        with st.container(border=True):
+            st.markdown("#### 🏃 Tren Pergerakan Manusia (PIR)")
+            # Cuma nampilin kolom Waktu dan PIR (0 atau 1)
+            data_pir = st.session_state.df_history[["Waktu", "PIR"]].set_index("Waktu")
+            st.line_chart(data_pir, color="#e67e22")
+
+    # === PARAMETER REFRESH OTOMATIS ===
+    time.sleep(3)
+    st.rerun()
 
 elif menu == "Statistik Data":
     st.title("📊 Statistik & History")
     with st.container(border=True):
         st.write("### 🗄️ Dataset Training Decision Tree")
         try:
-            df_dummy = pd.read_csv("data_dummy_sensor_kipas.csv")
+            df_dummy = pd.read_csv("data/dataset_sensor_skripsi.csv")
             st.dataframe(df_dummy)
         except FileNotFoundError:
-            st.error("File 'data_dummy_sensor_kipas.csv' tidak ditemukan di folder project.")
+            st.error("File 'dataset_sensor_skripsi.csv' tidak ditemukan di folder project.")
 
 elif menu == "Status Perangkat":
     st.title("💻 Hardware Monitoring")
