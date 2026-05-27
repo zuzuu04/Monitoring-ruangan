@@ -194,7 +194,7 @@ else:
                 
                 # Jika selisih waktu sekarang dengan data terakhir di Firebase lebih dari 10 detik
                 if last_seen_esp == 0:
-                    status_sistem = "ONLINE (No Heartbeat)"
+                    status_sistem = "ONLINE"
                 elif (waktu_sekarang_epoch - last_seen_esp) > 10:
                     status_sistem = "OFFLINE (Alat Mati)"
                 else:
@@ -314,7 +314,7 @@ if menu == "Dashboard Utama":
             else:
                 st.markdown("<h3 style='color: gray; text-align: center;'>⚪ SEPI</h3>", unsafe_allow_html=True)
 
-    # === 📈 TREN DATA SENSOR INTERAKTIF ===
+# 📈 --- GRAFIK DATA SENSOR ---
     st.write("### 📈 Tren Data Sensor Real-Time")
     if "df_history" not in st.session_state:
         st.session_state.df_history = pd.DataFrame(columns=["Waktu", "Suhu (°C)", "Kelembapan (%)", "Gas (PPM)", "PIR"])
@@ -326,17 +326,26 @@ if menu == "Dashboard Utama":
     if len(st.session_state.df_history) > 20:
         st.session_state.df_history = st.session_state.df_history.iloc[1:].reset_index(drop=True)
 
-    kolom_grafik1, kolom_grafik2 = st.columns(2)
-    with kolom_grafik1:
+    # Bikin 4 kolom biar grafik gas, suhu, lembab, pir sejajar
+    col_g1, col_g2 = st.columns(2)
+    
+    with col_g1:
         with st.container(border=True):
-            st.markdown("#### 💨 Tren Sensor Gas MQ135")
-            data_gas = st.session_state.df_history[["Waktu", "Gas (PPM)"]].set_index("Waktu")
-            st.line_chart(data_gas, color="#4A90E2")
-    with kolom_grafik2:
+            st.markdown("#### 🌡️ Tren Suhu (°C)")
+            st.line_chart(st.session_state.df_history[["Waktu", "Suhu (°C)"]].set_index("Waktu"), color="#D9534F")
+        
         with st.container(border=True):
-            st.markdown("#### 🏃 Tren Pergerakan Manusia (PIR)")
-            data_pir = st.session_state.df_history[["Waktu", "PIR"]].set_index("Waktu")
-            st.line_chart(data_pir, color="#e67e22")
+            st.markdown("#### 💨 Tren Sensor Gas MQ135 (PPM)")
+            st.line_chart(st.session_state.df_history[["Waktu", "Gas (PPM)"]].set_index("Waktu"), color="#4A90E2")
+
+    with col_g2:
+        with st.container(border=True):
+            st.markdown("#### 💧 Tren Kelembapan (%)")
+            st.line_chart(st.session_state.df_history[["Waktu", "Kelembapan (%)"]].set_index("Waktu"), color="#3B7FB9")
+            
+        with st.container(border=True):
+            st.markdown("#### 🏃 Tren Pergerakan (PIR)")
+            st.line_chart(st.session_state.df_history[["Waktu", "PIR"]].set_index("Waktu"), color="#e67e22")
 
     # === AUTO REFRESH LOOP (3 DETIK) ===
     time.sleep(3)
