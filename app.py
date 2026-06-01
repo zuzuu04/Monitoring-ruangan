@@ -3,6 +3,8 @@ import pandas as pd
 import time
 from streamlit_option_menu import option_menu
 import requests
+from datetime import datetime
+import pytz 
 
 # --- 0. KONFIGURASI HALAMAN ---
 st.set_page_config(layout="wide", page_title="Dashboard Monitoring Room")
@@ -11,14 +13,38 @@ st.set_page_config(layout="wide", page_title="Dashboard Monitoring Room")
 from sklearn.tree import DecisionTreeClassifier, plot_tree
 import matplotlib.pyplot as plt
 
-# --- 1. KONFIGURASI URL FIREBASE REALTIME DATABASE ---
-FIREBASE_URL = "https://monitoringruangan-16163-default-rtdb.asia-southeast1.firebasedatabase.app"
+# --- 1. KONFIGURASI URL & CREDENTIALS ---
+# Sudah dirapikan ujung URL-nya menggunakan garing (/)
+FIREBASE_URL = "https://monitoringruangan-16163-default-rtdb.asia-southeast1.firebasedatabase.app/"
+
+# Credential Telegram Lu
+TELEGRAM_TOKEN = "8928926243:AAEVJu2PPCHJ9A3I5E7Gzh_mHojqgDw6U-8"
+TELEGRAM_CHAT_ID = "8687837733"
+
+# --- FUNGSI KIRIM NOTIFIKASI TELEGRAM ---
+def kirim_notif_telegram(pesan):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": pesan,
+        "parse_mode": "Markdown"
+    }
+    try:
+        requests.post(url, json=payload, timeout=3)
+    except:
+        pass # Mengabaikan error jika koneksi internet putus/timeout
 
 # --- 2. INISIALISASI GLOBAL SESSION STATE (THRESHOLD DINAMIS) ---
 if "thresh_suhu" not in st.session_state:
     st.session_state.thresh_suhu = 30
 if "thresh_gas" not in st.session_state:
     st.session_state.thresh_gas = 300
+
+# State untuk mencegah spam notifikasi terus-menerus setiap 3 detik refresh
+if "last_alert_kipas" not in st.session_state:
+    st.session_state.last_alert_kipas = "MATI"
+if "last_alert_maling" not in st.session_state:
+    st.session_state.last_alert_maling = False
 
 # --- 3. CUSTOM CSS DENGAN ANIMASI EMERGENSI & SAKELAR VISUAL ---
 st.markdown("""
@@ -56,13 +82,11 @@ st.markdown("""
         box-shadow: 0 0 15px #ff4d4d;
     }
 
-    /* === SAKELAR VISUAL SAKTI (CSS HACK) === */
-    /* Membuat Toggle Default Streamlit Tidak Terlihat Tapi Tetap Berfungsi */
+    /* === SAKELAR VISUAL SAKTI === */
     [data-testid="stSidebarNav"] div[data-testid="toggle_kipas_ai"] {
         display: none !important;
     }
 
-    /* Membuat Visual Toggle Buatan (Hijau/Merah) */
     .custom-switch {
         position: relative;
         display: inline-block;
@@ -72,48 +96,40 @@ st.markdown("""
     }
     .custom-switch-slider {
         position: absolute;
-        cursor: not-allowed; /* Biar keliatan gak bisa diklik manual */
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
+        cursor: not-allowed;
+        top: 0; left: 0; right: 0; bottom: 0;
         border-radius: 34px;
         transition: 0.5s;
     }
     .custom-switch-slider:before {
         position: absolute;
         content: "";
-        height: 26px;
-        width: 26px;
-        left: 4px;
-        bottom: 4px;
+        height: 26px; width: 26px;
+        left: 4px; bottom: 4px;
         background-color: white;
         border-radius: 50%;
         transition: 0.5s;
     }
     
-    /* Gaya untuk Kipas NYALA (HIJAU) */
     .status-on .custom-switch-slider {
         background-color: #ADFF2F !important;
-        box-shadow: 0 0 15px #ADFF2F !important; /* Efek Neon Hijau */
+        box-shadow: 0 0 15px #ADFF2F !important;
     }
     .status-on .custom-switch-slider:before {
-        transform: translateX(26px); /* Geser buletan ke kanan */
+        transform: translateX(26px);
     }
     
-    /* Gaya untuk Kipas MATI (MERAH) */
     .status-off .custom-switch-slider {
         background-color: #D9534F !important;
-        box-shadow: 0 0 15px #D9534F !important; /* Efek Neon Merah */
+        box-shadow: 0 0 15px #D9534F !important;
     }
     .status-off .custom-switch-slider:before {
-        transform: translateX(0px); /* Geser buletan ke kiri */
+        transform: translateX(0px);
     }
-
     </style>
     """, unsafe_allow_html=True)
 
-# --- 4. FUNGSI ALUR VISUALISASI (OTOMATIS SINKRON) ---
+# --- 4. FUNGSI ALUR VISUALISASI ---
 def render_alur_dt(s, l, g, p):
     st_suhu = "NORMAL" if s <= st.session_state.thresh_suhu else "PANAS"
     st_lembab = "NORMAL" if l <= 70 else "LEMBAP"
@@ -157,6 +173,33 @@ with st.sidebar:
     )
     
     st.divider()
+    
+    # --- FITUR INTEGRASI KEAMANAN ALAT ---
+    st.markdown("### 🔒 Sistem Keamanan Alat")
+    
+    default_mode_aman = False
+    try:
+        resp_mode = requests.get(f"{FIREBASE_URL}Control_Perangkat/Mode_Aman.json", timeout=2)
+        if resp_mode.status_code == 200 and resp_mode.json() == "ON":
+            default_mode_aman = True
+    except:
+        pass
+
+    mode_keamanan = st.toggle("Aktifkan Alarm Anti-Maling", value=default_mode_aman, help="Jika AKTIF, buzzer ESP32 akan bunyi panjang saat PIR mendeteksi gerakan.")
+    
+    status_str = "ON" if mode_keamanan else "OFF"
+    try:
+        requests.patch(f"{FIREBASE_URL}Control_Perangkat.json", json={"Mode_Aman": status_str}, timeout=2)
+    except:
+        pass
+    
+    if mode_keamanan:
+        st.markdown("<p style='color: #D9534F; font-weight: bold; margin-top: -5px;'>🔴 STATUS: SIAGA (Anti-Maling Aktif)</p>", unsafe_allow_html=True)
+    else:
+        st.markdown("<p style='color: #777777; font-weight: bold; margin-top: -5px;'>⚪ STATUS: MATI (Standby)</p>", unsafe_allow_html=True)
+    
+    st.divider()
+    
     mode_simulasi = st.toggle("🔌 Aktifkan Mode Simulasi Alat", value=False, help="Gunakan ini jika hardware ESP32 offline")
     if mode_simulasi:
         st.info("Mode Simulasi Aktif. Gunakan slider di bawah untuk manipulasi data.")
@@ -164,9 +207,9 @@ with st.sidebar:
         sim_gas = st.slider("Simulasi Gas (PPM)", 100, 800, 230)
         sim_pir = st.selectbox("Simulasi PIR", ["Tidak Terdeteksi", "Terdeteksi"])
 
-# --- 6. MEMBACA DATA REAL-TIME (DENGAN DETEKSI OFFLINE HEARTBEAT) ---
+# --- 6. MEMBACA DATA REAL-TIME ---
 error_msg = ""
-suhu, kelembapan, gas_co, gerakan = 26.5, 55.0, 120.0, "Terdeteksi"
+suhu, kelembapan, gas_co, gerakan = 26.5, 55.0, 120.0, "Tidak Terdeteksi"
 
 if mode_simulasi:
     suhu = sim_suhu
@@ -176,7 +219,7 @@ if mode_simulasi:
     status_sistem = "SIMULATION MODE"
 else:
     try:
-        response = requests.get(f"{FIREBASE_URL}/Data_Sensor.json", timeout=5)
+        response = requests.get(f"{FIREBASE_URL}Data_Sensor.json", timeout=5)
         if response.status_code == 200:
             data_firebase = response.json()
             if data_firebase is not None:
@@ -186,19 +229,18 @@ else:
                 pir_status = int(data_firebase.get("Gerakan_PIR", 0))
                 gerakan = "Terdeteksi" if pir_status == 1 else "Tidak Terdeteksi"
                 
-                # --- LOGIKA HEARTBEAT CHECK ---
-                # Mengambil waktu terakhir ESP32 kirim data (dalam format Unix Epoch Time)
-                # Pastikan di kodingan ESP32 lo nanti ngirim variabel "Last_Seen" pakai fungsi epoch time / millis
-                last_seen_esp = data_firebase.get("Last_Seen", 0) 
+                # --- LOGIKA PENGECEKAN STATUS ONLINE / OFFLINE YANG VALID ---
+                last_seen_esp = data_firebase.get("Last_Seen", None) 
                 waktu_sekarang_epoch = int(time.time())
                 
-                # Jika selisih waktu sekarang dengan data terakhir di Firebase lebih dari 10 detik
-                if last_seen_esp == 0:
-                    status_sistem = "ONLINE"
-                elif (waktu_sekarang_epoch - last_seen_esp) > 10:
-                    status_sistem = "OFFLINE (Alat Mati)"
+                if last_seen_esp is not None:
+                    selisih_waktu = waktu_sekarang_epoch - int(last_seen_esp)
+                    if selisih_waktu > 5:
+                        status_sistem = "OFFLINE (Alat Mati)"
+                    else:
+                        status_sistem = "ONLINE"
                 else:
-                    status_sistem = "ONLINE"
+                    status_sistem = "OFFLINE (No Heartbeat Data)"
             else:
                 status_sistem = "FIREBASE EMPTY"
         else:
@@ -216,7 +258,7 @@ if menu == "Dashboard Utama":
     if error_msg and not mode_simulasi:
         st.error(f"Detail Error Firebase: {error_msg}")
 
-    # === PROSES TRAINING MACHINE LEARNING ===
+    # --- PROSES TRAINING MACHINE LEARNING ---
     data_ready = False
     try:
         df_train = pd.read_csv("data/dataset_sensor_skripsi.csv")
@@ -251,11 +293,9 @@ if menu == "Dashboard Utama":
                 
                 st.markdown("#### 🔌 Status Perangkat (Kipas)")
                 
-                # Menentukan warna CSS dinamis berdasarkan prediksi AI
                 class_status = "status-on" if hasil_prediksi == "NYALA" else "status-off"
                 status_warna = "HIJAU (Neon ON)" if hasil_prediksi == "NYALA" else "MERAH (Neon OFF)"
                 
-                # --- VISUAL SAKELAR BERWARNA-WARNI (SINKRONISED) ---
                 st.markdown(f"""
                     <div style="display: flex; align-items: center; gap: 15px; margin-top: 10px;">
                         <label class="custom-switch {class_status}">
@@ -269,23 +309,53 @@ if menu == "Dashboard Utama":
                 
                 st.caption("Sakelar dikontrol sepenuhnya oleh logika AI, tidak bisa diklik manual.")
                 
-                # Notifikasi Visual Di Bawah Sakelar
+                # --- LOGIKA WAKTU DI TELE ---
+                zona_wib = pytz.timezone('Asia/Jakarta')
+                waktu_notif = datetime.now(zona_wib).strftime('%d-%m-%Y %H:%M:%S')
+                
+                # --- INTEGRASI LOGIKA NOTIFIKASI TELEGRAM ---
                 if hasil_prediksi == "NYALA":
                     st.error(f"⚠️ TRIGGER C4.5: Kipas telah diaktifkan secara otomatis!")
+                    
+                    if st.session_state.last_alert_kipas == "MATI":
+                        pesan_kipas = (
+                            f"🚨 *PERINGATAN SISTEM LU* 🚨\n\n"
+                            f"📅 *Waktu:* {waktu_notif} WIB\n"
+                            f"⚠️ AI C4.5 mendeteksi kadar gas berbahaya! *Kipas Otomatis Dinyalakan*.\n"
+                            f"💨 *Gas CO:* {gas_co} PPM\n"
+                            f"🌡️ *Suhu:* {suhu} °C"
+                        )
+                        kirim_notif_telegram(pesan_kipas)
+                        st.session_state.last_alert_kipas = "NYALA"
+
                     if not mode_simulasi:
-                        try: requests.patch(f"{FIREBASE_URL}/Control_Perangkat.json", json={"Kipas": "NYALA"}, timeout=3)
+                        try: requests.patch(f"{FIREBASE_URL}Control_Perangkat.json", json={"Kipas": "NYALA"}, timeout=3)
                         except: pass
                 else:
                     st.success(f"✅ TRIGGER C4.5: Ruangan aman, kipas dinonaktifkan.")
+                    
+                    if st.session_state.last_alert_kipas == "NYALA":
+                        pesan_aman = f"✅ *INFO SISTEM:*\n📅 *Waktu:* {waktu_notif} WIB\nKondisi ruangan sudah kembali normal. Kipas dinonaktifkan."
+                        kirim_notif_telegram(pesan_aman)
+                        st.session_state.last_alert_kipas = "MATI"
+                        
                     if not mode_simulasi:
-                        try: requests.patch(f"{FIREBASE_URL}/Control_Perangkat.json", json={"Kipas": "MATI"}, timeout=3)
+                        try: requests.patch(f"{FIREBASE_URL}Control_Perangkat.json", json={"Kipas": "MATI"}, timeout=3)
                         except: pass
-            else:
-                st.warning("Model belum siap karena dataset gagal dimuat.")
 
-            
-
-    st.divider()
+                # --- NOTIFIKASI TELEGRAM UNTUK ANTI-MALING (PIR) ---
+                if mode_keamanan and gerakan == "Terdeteksi":
+                    if not st.session_state.last_alert_maling:
+                        pesan_maling = (
+                            f"⚠️ *ALARM KEAMANAN (ANTI-MALING)* ⚠️\n\n"
+                            f"📅 *Waktu:* {waktu_notif} WIB\n"
+                            f"Terdeteksi adanya pergerakan mencurigakan saat Mode Siaga Aktif!\n"
+                            f"🏃 *Status PIR:* Ada Gerakan!"
+                        )
+                        kirim_notif_telegram(pesan_maling)
+                        st.session_state.last_alert_maling = True
+                elif gerakan == "Tidak Terdeteksi":
+                    st.session_state.last_alert_maling = False
 
     if data_ready:
         st.write("### 🌳 Hasil Training: Struktur Pohon Keputusan")
@@ -312,11 +382,11 @@ if menu == "Dashboard Utama":
         with st.container(border=True):
             st.markdown("### 🏃 Gerakan")
             if gerakan == "Terdeteksi":
-                st.markdown("<h3 style='color: red; text-align: center; font-weight: bold;'>🔴 AKTIF</h3>", unsafe_allow_html=True)
+                st.markdown("<h3 style='color: red; text-align: center; font-weight: bold;'>🔴 ADA PERGERAKAN</h3>", unsafe_allow_html=True)
             else:
-                st.markdown("<h3 style='color: gray; text-align: center;'>⚪ SEPI</h3>", unsafe_allow_html=True)
+                st.markdown("<h3 style='color: gray; text-align: center;'>⚪ TIDAK ADA PERGERAKAN</h3>", unsafe_allow_html=True)
 
-# 📈 --- GRAFIK DATA SENSOR ---
+    # --- GRAFIK DATA SENSOR ---
     st.write("### 📈 Tren Data Sensor Real-Time")
     if "df_history" not in st.session_state:
         st.session_state.df_history = pd.DataFrame(columns=["Waktu", "Suhu (°C)", "Kelembapan (%)", "Gas (PPM)", "PIR"])
@@ -328,7 +398,6 @@ if menu == "Dashboard Utama":
     if len(st.session_state.df_history) > 20:
         st.session_state.df_history = st.session_state.df_history.iloc[1:].reset_index(drop=True)
 
-    # Bikin 4 kolom biar grafik gas, suhu, lembab, pir sejajar
     col_g1, col_g2 = st.columns(2)
     
     with col_g1:
@@ -349,11 +418,11 @@ if menu == "Dashboard Utama":
             st.markdown("#### 🏃 Tren Pergerakan (PIR)")
             st.line_chart(st.session_state.df_history[["Waktu", "PIR"]].set_index("Waktu"), color="#e67e22")
 
-    # === AUTO REFRESH LOOP (3 DETIK) ===
+    # --- AUTO REFRESH LOOP (3 DETIK) --- 
     time.sleep(3)
     st.rerun()
 
-# ... (Menu Statistik, Status Perangkat, Log, dan Pengaturan tetep sama seperti sebelumnya) ...
+# --- PANEL MENU LAIN ---
 elif menu == "Statistik Data":
     st.title("📊 Statistik & History")
     with st.container(border=True):
