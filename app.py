@@ -283,6 +283,8 @@ if menu == "Dashboard Utama":
             else:
                 st.warning("Model belum siap karena dataset gagal dimuat.")
 
+            
+
     st.divider()
 
     if data_ready:
