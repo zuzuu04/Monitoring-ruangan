@@ -24,6 +24,10 @@ FirebaseAuth auth;
 unsigned long prevMillis = 0;
 const long interval = 2000;
 
+// Variabel tambahan untuk menampung status kontrol dari Firebase
+String statusKipas = "MATI";
+String statusModeAman = "OFF"; 
+
 void setup() {
   Serial.begin(115200);
   
@@ -65,35 +69,56 @@ void loop() {
     float hum = dht.readHumidity();
 
     // 2. Kalibrasi Suhu (Offset 6 derajat agar tidak terpengaruh panas komponen)
-    // Gunakan isnan untuk cek jika sensor gagal membaca
     float suhu = isnan(suhu_raw) ? 0.0 : (suhu_raw - 6.0);
     if (isnan(hum)) hum = 0.0;
 
     // Debugging di Serial Monitor
     Serial.printf("Gas: %d | PIR: %d | Suhu: %.2fC | Hum: %.2f%%\n", gas, motion, suhu, hum);
 
-    // 3. Logika Buzzer (Gerak = Bunyi)
-    if (motion == HIGH) {
-      digitalWrite(BUZZER_PIN, HIGH);
-    } else {
-      digitalWrite(BUZZER_PIN, LOW);
-    }
-
-    // 4. Kirim ke Firebase
+    // 3. Kirim Data Sensor ke Firebase
     if (Firebase.ready()) {
       Firebase.setInt(fbdo, "/Data_Sensor/Gas_PPM", gas);
       Firebase.setInt(fbdo, "/Data_Sensor/Gerakan_PIR", motion);
       Firebase.setFloat(fbdo, "/Data_Sensor/Suhu", suhu);
       Firebase.setFloat(fbdo, "/Data_Sensor/Kelembapan", hum);
 
-      // 5. Kontrol Kipas
+      // 4. Ambil Status Kontrol Kipas dari Firebase
       if (Firebase.getString(fbdo, "/Control_Perangkat/Kipas")) {
-        if (fbdo.stringData() == "NYALA") {
-          digitalWrite(RELAY_PIN, LOW); // Relay Aktif LOW
-        } else {
-          digitalWrite(RELAY_PIN, HIGH);
-        }
+        statusKipas = fbdo.stringData();
       }
+
+      // 5. Ambil Status Mode Keamanan Maling dari Firebase
+      if (Firebase.getString(fbdo, "/Control_Perangkat/Mode_Aman")) {
+        statusModeAman = fbdo.stringData();
+      }
+    }
+
+    // 6. Eksekusi Kontrol Kipas (Relay Aktif LOW)
+    if (statusKipas == "NYALA") {
+      digitalWrite(RELAY_PIN, LOW); 
+    } else {
+      digitalWrite(RELAY_PIN, HIGH);
+    }
+
+    // 7. Logika Gabungan Multi-Tone Alarm untuk Buzzer
+    // PRIORITAS 1: Gas Bocor / Asap Pekat (Berdasarkan ambang batas pohon keputusanmu kemarin, misal > 366)
+    if (gas > 366) {
+      Serial.println("ALARM: Gas Bahaya Terdeteksi!");
+      // Bunyi putus-putus cepat (Beep... Beep...)
+      digitalWrite(BUZZER_PIN, HIGH);
+      delay(150);
+      digitalWrite(BUZZER_PIN, LOW);
+      delay(150);
+    }
+    // PRIORITAS 2: Maling / Penyusup (Hanya berbunyi jika Mode_Aman di Streamlit di-set "ON" DAN ada gerakan)
+    else if (statusModeAman == "ON" && motion == HIGH) {
+      Serial.println("ALARM: Penyusup Terdeteksi!");
+      // Bunyi konstan panjang menakuti maling (Breeeeeep)
+      digitalWrite(BUZZER_PIN, HIGH); 
+    }
+    // KONDISI AMAN: Matikan Buzzer
+    else {
+      digitalWrite(BUZZER_PIN, LOW);
     }
   }
 }
