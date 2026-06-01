@@ -1,6 +1,8 @@
 #include <WiFi.h>
 #include <FirebaseESP32.h>
 #include <DHT.h>
+#include <WiFiUdp.h>
+#include <NTPClient.h>
 
 // --- Konfigurasi ---
 #define WIFI_SSID "Bergas"
@@ -20,6 +22,9 @@ DHT dht(DHTPIN, DHTTYPE);
 FirebaseData fbdo;
 FirebaseConfig config;
 FirebaseAuth auth;
+
+WiFiUDP ntpUDP; 
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 25200);
 
 unsigned long prevMillis = 0;
 const long interval = 2000;
@@ -53,6 +58,8 @@ void setup() {
   config.signer.tokens.legacy_token = FIREBASE_AUTH;
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
+
+  timeClient.begin();
 }
 
 void loop() {
@@ -61,6 +68,10 @@ void loop() {
   unsigned long currentMillis = millis();
   if (currentMillis - prevMillis >= interval) {
     prevMillis = currentMillis;
+
+    // --- REVISI 2: Ambil waktu epoch terbaru dari internet sebelum dikirim ---
+    timeClient.update();
+    unsigned long waktuSekarang = timeClient.getEpochTime();
 
     // 1. Baca Sensor Real
     int gas = analogRead(MQ135_PIN);
@@ -81,6 +92,9 @@ void loop() {
       Firebase.setInt(fbdo, "/Data_Sensor/Gerakan_PIR", motion);
       Firebase.setFloat(fbdo, "/Data_Sensor/Suhu", suhu);
       Firebase.setFloat(fbdo, "/Data_Sensor/Kelembapan", hum);
+      
+      // --- REVISI 3: Mengubah ke setInt, variabel waktuSekarang, dan folder Last_Seen ---
+      Firebase.setInt(fbdo, "/Data_Sensor/Last_Seen", waktuSekarang); 
 
       // 4. Ambil Status Kontrol Kipas dari Firebase
       if (Firebase.getString(fbdo, "/Control_Perangkat/Kipas")) {
