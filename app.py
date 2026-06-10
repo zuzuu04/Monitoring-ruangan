@@ -387,7 +387,7 @@ if menu == "Dashboard Utama":
                 st.markdown("<h3 style='color: gray; text-align: center;'>⚪ TIDAK ADA PERGERAKAN</h3>", unsafe_allow_html=True)
 
     # --- GRAFIK DATA SENSOR ---
-    st.write("### 📈 Tren Data Sensor Real-Time")
+    st.write("### 📈 Grafik Sensor Real-Time")
     if "df_history" not in st.session_state:
         st.session_state.df_history = pd.DataFrame(columns=["Waktu", "Suhu (°C)", "Kelembapan (%)", "Gas (PPM)", "PIR"])
 
@@ -402,20 +402,20 @@ if menu == "Dashboard Utama":
     
     with col_g1:
         with st.container(border=True):
-            st.markdown("#### 🌡️ Tren Suhu (°C)")
+            st.markdown("#### 🌡️ Suhu (°C)")
             st.line_chart(st.session_state.df_history[["Waktu", "Suhu (°C)"]].set_index("Waktu"), color="#D9534F")
         
         with st.container(border=True):
-            st.markdown("#### 💨 Tren Sensor Gas MQ135 (PPM)")
+            st.markdown("#### 💨 Gas MQ135 (PPM)")
             st.line_chart(st.session_state.df_history[["Waktu", "Gas (PPM)"]].set_index("Waktu"), color="#4A90E2")
 
     with col_g2:
         with st.container(border=True):
-            st.markdown("#### 💧 Tren Kelembapan (%)")
+            st.markdown("#### 💧 Kelembapan (%)")
             st.line_chart(st.session_state.df_history[["Waktu", "Kelembapan (%)"]].set_index("Waktu"), color="#3B7FB9")
             
         with st.container(border=True):
-            st.markdown("#### 🏃 Tren Pergerakan (PIR)")
+            st.markdown("#### 🏃 Pergerakan (PIR)")
             st.line_chart(st.session_state.df_history[["Waktu", "PIR"]].set_index("Waktu"), color="#e67e22")
 
     # --- AUTO REFRESH LOOP (3 DETIK) --- 
