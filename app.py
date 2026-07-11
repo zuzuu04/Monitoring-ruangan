@@ -295,7 +295,11 @@ if menu == "Dashboard Utama":
 
             if data_ready:
                 input_pir   = 1 if gerakan == "Terdeteksi" else 0
-                hasil       = model_dt.predict([[suhu, kelembapan, gas_co, input_pir]])[0]
+                input_data = pd.DataFrame(
+                    [[suhu, kelembapan, gas_co, input_pir]], 
+                    columns=['Suhu', 'Kelembapan', 'Gas_PPM', 'Gerakan_PIR']
+                )
+                hasil = model_dt.predict(input_data)[0]
                 class_status = "status-on" if hasil == "NYALA" else "status-off"
                 warna_label  = "#2ECC71" if hasil == "NYALA" else "#94A3B8"
 
@@ -629,4 +633,4 @@ elif menu == "Pengaturan":
         - Keputusan logika kipas dikendalikan model AI hasil training dataset C4.5.
         """)
         if st.button("Simpan & Terapkan"):
-            st.success("✅ Threshold visualisasi diperbarui!")
+            st.success("✅ Threshold visualisasi diperbarui!")``
