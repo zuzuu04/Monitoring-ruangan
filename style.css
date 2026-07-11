@@ -1,0 +1,70 @@
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    background-color: transparent;
+    border-radius: 15px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05), 0 1px 3px rgba(0,0,0,0.1);
+    padding: 20px;
+}
+[data-testid="stMetricValue"] { font-size: 24px; }
+.step-box {
+    color: #ffffff !important;
+    padding: 12px;
+    border-radius: 8px;
+    min-width: 120px; text-align: center;
+    font-size: 13px; font-weight: 600;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+.step-box small {
+    display: block;
+    margin-top: 4px;
+    font-weight: bold;
+    opacity: 0.9;
+}
+
+@keyframes blink {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+.blink-alarm {
+    animation: blink 1.5s infinite;
+    background-color: rgba(217, 83, 79, 0.15);
+    color: #E74C3C;
+    padding: 8px;
+    border-radius: 8px;
+    font-weight: bold;
+    text-align: center;
+    border: 1px solid rgba(217, 83, 79, 0.4);
+}
+.standby-badge {
+    background-color: rgba(120, 120, 120, 0.15);
+    color: #7F8C8D;
+    padding: 8px;
+    border-radius: 8px;
+    font-weight: bold;
+    text-align: center;
+    border: 1px solid rgba(120, 120, 120, 0.3);
+}
+.arrow { color: #94A3B8; font-size: 16px; font-weight: bold; }
+@keyframes pulse-subtle {
+    0%   { opacity: 1; }
+    50%  { opacity: 0.7; }
+    100% { opacity: 1; }
+}
+.danger-pulse { animation: pulse-subtle 1.5s infinite; }
+.custom-switch { position: relative; display: inline-block; width: 50px; height: 26px; }
+.custom-switch-slider {
+    position: absolute; cursor: not-allowed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    border-radius: 26px; transition: 0.4s;
+    background-color: #CBD5E1;
+}
+.custom-switch-slider:before {
+    position: absolute; content: "";
+    height: 18px; width: 18px;
+    left: 4px; bottom: 4px;
+    background-color: white; border-radius: 50%; transition: 0.4s;
+}
+.status-on .custom-switch-slider { background-color: #2ECC71 !important; }
+.status-on .custom-switch-slider:before { transform: translateX(24px); }
+.status-off .custom-switch-slider { background-color: #94A3B8 !important; }
+.status-off .custom-switch-slider:before { transform: translateX(0px); }
