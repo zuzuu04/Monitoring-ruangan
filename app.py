@@ -373,7 +373,8 @@ if menu == "Dashboard Utama":
                 dot_str = dot_str.replace('fillcolor="#e58139"', 'fillcolor="#FFE6CC" style="filled,rounded" color="#D3D3D3"')
                 dot_str = dot_str.replace('fillcolor="#399de5"', 'fillcolor="#E6F2FF" style="filled,rounded" color="#D3D3D3"')
                 st.graphviz_chart(dot_str, use_container_width=True)
-                
+
+     #--- Penjelasan Logika Decision Tree ---            
         with tab_logika:
             with st.container(border=True):
                 st.markdown("#### 🔍 Hasil Logika Decision Tree (Klik Expand untuk Membuka Alur)")
@@ -495,7 +496,7 @@ elif menu == "Statistik Data":
             st.dataframe(pir_matrix, use_container_width=True)
 
         st.divider()
-        st.markdown("#### 🗄️ Penjelajah Data (Data Explorer)")
+        st.markdown("#### 🗄️ Data Explorer")
         st.dataframe(
             df_train, 
             use_container_width=True, 
