@@ -114,7 +114,20 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 </style>
 """, unsafe_allow_html=True)
 
-# --- 5. VISUALISASI ALUR DECISION TREE (FIXED CLASS CALL) ---
+# --- 5. TRAINING MODEL (CACHED, BISA DIPAKAI DI HALAMAN MANAPUN) ---
+@st.cache_resource
+def train_model():
+    try:
+        df = pd.read_csv("data/dataset_sensor_skripsi.csv")
+        X = df[['Suhu', 'Kelembapan', 'Gas_PPM', 'Gerakan_PIR']]
+        y = df['Status_Kipas']
+        model = DecisionTreeClassifier(criterion='entropy', max_depth=3, random_state=42)
+        model.fit(X, y)
+        return model, True
+    except FileNotFoundError:
+        return None, False
+
+# --- 5B. VISUALISASI ALUR DECISION TREE (FIXED CLASS CALL) ---
 def render_alur_dt(s, l, g, p):
     st_suhu  = "NORMAL" if s <= st.session_state.thresh_suhu else "PANAS"
     st_lembab = "NORMAL" if l <= 70 else "LEMBAP"
@@ -260,21 +273,14 @@ else:
 # --- 8. HALAMAN DASHBOARD UTAMA ---
 if menu == "Dashboard Utama":
     st.title("🏠 Dashboard Monitoring")
-    st.subheader("Implementasi Decision Tree C4.5 — Hybrid AI + Rule-Based Safety")
+    st.subheader("Informasi Kondisi Ruangan Real-Time")
 
     if error_msg and not mode_simulasi:
         st.error(f"Firebase Error: {error_msg}")
 
-    # --- Training Model Decision Tree ---
-    data_ready = False
-    try:
-        df_train = pd.read_csv("data/dataset_sensor_skripsi.csv")
-        X = df_train[['Suhu', 'Kelembapan', 'Gas_PPM', 'Gerakan_PIR']]
-        y = df_train['Status_Kipas']
-        model_dt = DecisionTreeClassifier(criterion='entropy', max_depth=3, random_state=42)
-        model_dt.fit(X, y)
-        data_ready = True
-    except FileNotFoundError:
+    # --- Load Model Decision Tree (cached) ---
+    model_dt, data_ready = train_model()
+    if not data_ready:
         st.error("Dataset tidak ditemukan: 'data/dataset_sensor_skripsi.csv'")
 
     col1, col2 = st.columns([1, 2.3])
@@ -357,57 +363,6 @@ if menu == "Dashboard Utama":
                 elif gerakan == "Tidak Terdeteksi":
                     st.session_state.last_alert_maling = False
 
-    # --- ANALISIS POHON KEPUTUSAN INTERAKTIF ---
-    if data_ready:
-        st.write("### 🌳 Analisis Struktur Pohon Keputusan C4.5")
-        tab_grafik, tab_logika = st.tabs(["📊 Visualisasi Decision Tree", "📜 Aturan Decision Tree"])
-        
-        with tab_grafik:
-            with st.container(border=True):
-                dot_str = export_graphviz(
-                    model_dt, 
-                    out_file=None, 
-                    feature_names=['Suhu', 'Kelembapan', 'Gas_PPM', 'PIR'],
-                    class_names=model_dt.classes_,
-                    filled=True, 
-                    rounded=True,  
-                    special_characters=True,
-                    impurity=False
-                )
-                dot_str = dot_str.replace('fillcolor="#e58139"', 'fillcolor="#FFE6CC" style="filled,rounded" color="#D3D3D3"')
-                dot_str = dot_str.replace('fillcolor="#399de5"', 'fillcolor="#E6F2FF" style="filled,rounded" color="#D3D3D3"')
-                st.graphviz_chart(dot_str, use_container_width=True)
-
-     #--- Penjelasan Logika Decision Tree ---            
-        with tab_logika:
-            with st.container(border=True):
-                st.markdown("#### 🔍 Hasil Logika Decision Tree (Klik Expand untuk Membuka Alur)")
-                
-                def render_rules_interactive(tree, feature_names):
-                    tree_ = tree.tree_
-                    feature_name = [feature_names[i] if i != _tree.TREE_UNDEFINED else "undefined!" for i in tree_.feature]
-                    
-                    def recurse(node, depth):
-                        if tree_.feature[node] != _tree.TREE_UNDEFINED:
-                            name = feature_name[node]
-                            threshold = tree_.threshold[node]
-                            
-                            with st.expander(f"{'  ' * depth}🔹 JIKA {name} ≤ {threshold:.2f}"):
-                                recurse(tree_.children_left[node], depth + 1)
-                                
-                            with st.expander(f"{'  ' * depth}🔸 JIKA {name} > {threshold:.2f}"):
-                                recurse(tree_.children_right[node], depth + 1)
-                        else:
-                            value = tree_.value[node]
-                            ind = value.argmax()
-                            kelas = model_dt.classes_[ind]
-                            badge = "🟢 NYALA" if kelas == "NYALA" else "🔴 MATI" # FIXED LOGIC BADGE HERE
-                            st.markdown(f"{'  ' * depth} ➔ 🚪 KIPAS : **{badge}**")
-                            
-                    recurse(0, 0)
-                
-                render_rules_interactive(model_dt, ['Suhu (°C)', 'Kelembapan (%)', 'Gas (PPM)', 'PIR'])
-
     # --- Kartu Sensor ---
     st.write("### 📡 Parameter Sensor")
     c1, c2, c3, c4 = st.columns(4)
@@ -443,18 +398,19 @@ if menu == "Dashboard Utama":
         [st.session_state.df_history, data_baru], ignore_index=True
     ).iloc[-20:]
 
-    col_g1, col_g2 = st.columns(2)
+    col_g1, col_g2, col_g3 = st.columns(3)
     with col_g1:
         with st.container(border=True):
-            st.markdown("#### 🌡️ Suhu (°C)")
-            st.line_chart(st.session_state.df_history[["Waktu","Suhu (°C)"]].set_index("Waktu"), color="#D9534F")
+            st.markdown("#### 🌡️💧 Suhu & Kelembapan")
+            st.line_chart(
+                st.session_state.df_history[["Waktu", "Suhu (°C)", "Kelembapan (%)"]].set_index("Waktu"),
+                color=["#D9534F", "#3B7FB9"]
+            )
+    with col_g2:
         with st.container(border=True):
             st.markdown("#### 💨 Kualitas Udara (PPM)")
             st.line_chart(st.session_state.df_history[["Waktu","Gas (PPM)"]].set_index("Waktu"), color="#4A90E2")
-    with col_g2:
-        with st.container(border=True):
-            st.markdown("#### 💧 Kelembapan (%)")
-            st.line_chart(st.session_state.df_history[["Waktu","Kelembapan (%)"]].set_index("Waktu"), color="#3B7FB9")
+    with col_g3:
         with st.container(border=True):
             st.markdown("#### 🏃 Pergerakan (PIR)")
             st.line_chart(st.session_state.df_history[["Waktu","PIR"]].set_index("Waktu"), color="#e67e22")
@@ -482,7 +438,9 @@ elif menu == "Statistik Data":
 
         st.divider()
         st.markdown("#### 🔬 Distribusi Parameter Sensor dalam Dataset")
-        tab_suhu, tab_gas, tab_pir = st.tabs(["🌡️ Sebaran Suhu", "💨 Sebaran Gas MQ135", "🏃 Distribusi PIR"])
+        tab_suhu, tab_gas, tab_pir, tab_tree = st.tabs(
+            ["🌡️ Sebaran Suhu", "💨 Sebaran Gas MQ135", "🏃 Distribusi PIR", "🌳 Analisis Decision Tree"]
+        )
         
         with tab_suhu:
             st.write("Rata-rata suhu ruangan dalam dataset berdasarkan status kipas:")
@@ -498,6 +456,54 @@ elif menu == "Statistik Data":
             st.write("Korelasi gerakan PIR terhadap status kipas:")
             pir_matrix = pd.crosstab(df_train['Gerakan_PIR'], df_train['Status_Kipas'])
             st.dataframe(pir_matrix, use_container_width=True)
+
+        with tab_tree:
+            model_dt, data_ready = train_model()
+            if data_ready:
+                st.markdown("#### 📊 Visualisasi Decision Tree C4.5")
+                with st.container(border=True):
+                    dot_str = export_graphviz(
+                        model_dt,
+                        out_file=None,
+                        feature_names=['Suhu', 'Kelembapan', 'Gas_PPM', 'PIR'],
+                        class_names=model_dt.classes_,
+                        filled=True,
+                        rounded=True,
+                        special_characters=True,
+                        impurity=False
+                    )
+                    dot_str = dot_str.replace('fillcolor="#e58139"', 'fillcolor="#FFE6CC" style="filled,rounded" color="#D3D3D3"')
+                    dot_str = dot_str.replace('fillcolor="#399de5"', 'fillcolor="#E6F2FF" style="filled,rounded" color="#D3D3D3"')
+                    st.graphviz_chart(dot_str, use_container_width=True)
+
+                st.markdown("#### 📜 Aturan Decision Tree (Klik Expand untuk Membuka Alur)")
+                with st.container(border=True):
+                    def render_rules_interactive(tree, feature_names):
+                        tree_ = tree.tree_
+                        feature_name = [feature_names[i] if i != _tree.TREE_UNDEFINED else "undefined!" for i in tree_.feature]
+
+                        def recurse(node, depth):
+                            if tree_.feature[node] != _tree.TREE_UNDEFINED:
+                                name = feature_name[node]
+                                threshold = tree_.threshold[node]
+
+                                with st.expander(f"{'  ' * depth}🔹 JIKA {name} ≤ {threshold:.2f}"):
+                                    recurse(tree_.children_left[node], depth + 1)
+
+                                with st.expander(f"{'  ' * depth}🔸 JIKA {name} > {threshold:.2f}"):
+                                    recurse(tree_.children_right[node], depth + 1)
+                            else:
+                                value = tree_.value[node]
+                                ind = value.argmax()
+                                kelas = model_dt.classes_[ind]
+                                badge = "🟢 NYALA" if kelas == "NYALA" else "🔴 MATI"
+                                st.markdown(f"{'  ' * depth} ➔ 🚪 KIPAS : **{badge}**")
+
+                        recurse(0, 0)
+
+                    render_rules_interactive(model_dt, ['Suhu (°C)', 'Kelembapan (%)', 'Gas (PPM)', 'PIR'])
+            else:
+                st.error("Model belum siap — dataset tidak ditemukan.")
 
         st.divider()
         st.markdown("#### 🗄️ Data Explorer")
