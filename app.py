@@ -633,4 +633,4 @@ elif menu == "Pengaturan":
         - Keputusan logika kipas dikendalikan model AI hasil training dataset C4.5.
         """)
         if st.button("Simpan & Terapkan"):
-            st.success("✅ Threshold visualisasi diperbarui!")``
+            st.success("✅ Threshold visualisasi diperbarui!")
