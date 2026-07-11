@@ -1,16 +1,21 @@
 """
 Fungsi-fungsi bantu untuk Dashboard Monitoring Room:
 - kirim_notif_telegram : kirim notifikasi ke Telegram
-- train_model          : training Decision Tree C4.5 (di-cache biar nggak retrain terus)
+- measure_latency      : ukur latency asli ke Firebase (bukan angka statis)
+- train_model          : training Decision Tree C4.5 + hitung akurasi jujur via holdout test set
 - render_alur_dt       : render visual alur SUHU -> LEMBAP -> GAS -> PIR
+- render_decision_tree_analysis : render grafik pohon + aturan interaktif
 """
 
 import requests
+import time
 import pandas as pd
 import streamlit as st
 from sklearn.tree import DecisionTreeClassifier, _tree, export_graphviz
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
 
-from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, DATASET_PATH
+from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, DATASET_PATH, FIREBASE_URL
 
 
 def kirim_notif_telegram(pesan: str):
@@ -23,22 +28,57 @@ def kirim_notif_telegram(pesan: str):
         pass
 
 
+def measure_latency():
+    """
+    Ukur latency beneran ke Firebase dengan ping request kecil.
+    Return: (latency_ms: int | None, status: str)
+    """
+    try:
+        t0 = time.perf_counter()
+        r = requests.get(f"{FIREBASE_URL}Data_Sensor.json", timeout=5)
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        if r.status_code == 200:
+            return latency_ms, "OK"
+        return latency_ms, f"HTTP {r.status_code}"
+    except Exception:
+        return None, "TIMEOUT/ERROR"
+
+
 @st.cache_resource
 def train_model():
     """
     Training Decision Tree C4.5 dari dataset skripsi.
+    Model final di-fit ke SELURUH data (dipakai untuk prediksi live).
+    Akurasi yang dilaporkan dihitung dari train/test split terpisah (80/20)
+    supaya jujur merepresentasikan performa di data yang belum pernah dilihat model,
+    bukan skor "menghafal" data training itu sendiri.
+
     Di-cache (st.cache_resource) supaya nggak retrain ulang tiap auto-refresh.
-    Return: (model, data_ready: bool)
+    Return: (model, data_ready: bool, akurasi_holdout: float | None, n_test: int)
     """
     try:
         df = pd.read_csv(DATASET_PATH)
         X = df[['Suhu', 'Kelembapan', 'Gas_PPM', 'Gerakan_PIR']]
         y = df['Status_Kipas']
+
+        akurasi_holdout = None
+        n_test = 0
+        # Evaluasi jujur pakai data yang disisihkan (kalau datanya cukup buat displit)
+        if len(df) >= 10:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42, stratify=y if y.nunique() > 1 else None
+            )
+            eval_model = DecisionTreeClassifier(criterion='entropy', max_depth=3, random_state=42)
+            eval_model.fit(X_train, y_train)
+            akurasi_holdout = accuracy_score(y_test, eval_model.predict(X_test))
+            n_test = len(X_test)
+
+        # Model final dipakai untuk prediksi live: di-fit ke semua data yang ada
         model = DecisionTreeClassifier(criterion='entropy', max_depth=3, random_state=42)
         model.fit(X, y)
-        return model, True
+        return model, True, akurasi_holdout, n_test
     except FileNotFoundError:
-        return None, False
+        return None, False, None, 0
 
 
 def render_alur_dt(s, l, g, p, thresh_suhu, thresh_gas):
