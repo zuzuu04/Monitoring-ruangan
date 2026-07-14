@@ -9,6 +9,7 @@ Fungsi-fungsi bantu untuk Dashboard Monitoring Room:
 
 import requests
 import time
+from typing import Optional
 import pandas as pd
 import streamlit as st
 from sklearn.tree import DecisionTreeClassifier, _tree, export_graphviz
@@ -79,6 +80,79 @@ def train_model():
         return model, True, akurasi_holdout, n_test
     except FileNotFoundError:
         return None, False, None, 0
+
+
+def get_alert_state(gas_bahaya: bool, suhu_tinggi: bool, mode_keamanan: bool, pir_aktif: bool) -> str:
+    """
+    Tentukan state alert tertinggi yang aktif saat ini, berdasarkan 3 lapis logika:
+    - Lapis 1 (Safety lingkungan, selalu aktif): gas bahaya dan/atau suhu tinggi
+    - Lapis 2 (Keamanan, cuma aktif kalau Mode Aman ON): PIR aktif tanpa bahaya lingkungan
+    - Lapis 3 (Darurat): Mode Aman ON + PIR aktif BERSAMAAN dengan bahaya lingkungan
+    Return salah satu: "EMERGENCY", "GAS_SUHU", "GAS", "SUHU", "INTRUDER", "NONE"
+    """
+    if mode_keamanan and pir_aktif and (gas_bahaya or suhu_tinggi):
+        return "EMERGENCY"
+    if gas_bahaya and suhu_tinggi:
+        return "GAS_SUHU"
+    if gas_bahaya:
+        return "GAS"
+    if suhu_tinggi:
+        return "SUHU"
+    if mode_keamanan and pir_aktif:
+        return "INTRUDER"
+    return "NONE"
+
+
+def build_alert_message(state: str, waktu_notif: str, suhu: float, gas_co: float) -> Optional[str]:
+    """
+    Susun pesan notifikasi Telegram sesuai state alert.
+    Return None kalau state ini nggak perlu dikirim notifikasi (misal NONE atau PIR sirkulasi biasa).
+    """
+    header = f"📅 *Waktu:* {waktu_notif} WIB\n"
+
+    if state == "EMERGENCY":
+        return (
+            f"🚨🚨 *DARURAT — RUMAH KOSONG* 🚨🚨\n\n{header}"
+            f"Terdeteksi *pergerakan* BERSAMAAN dengan kondisi lingkungan tidak normal "
+            f"saat rumah seharusnya kosong (Mode Aman aktif)!\n"
+            f"💨 *Gas CO:* {gas_co} PPM\n🌡️ *Suhu:* {suhu} °C\n\n"
+            f"Ini bisa jadi indikasi kebakaran/kebocoran gas, BUKAN sekadar gerakan biasa. Segera periksa!"
+        )
+    if state == "GAS_SUHU":
+        return (
+            f"🚨 *PERINGATAN LINGKUNGAN* 🚨\n\n{header}"
+            f"Gas berbahaya DAN suhu tinggi terdeteksi bersamaan. *Kipas otomatis dinyalakan*.\n"
+            f"💨 *Gas CO:* {gas_co} PPM\n🌡️ *Suhu:* {suhu} °C"
+        )
+    if state == "GAS":
+        return (
+            f"🚨 *PERINGATAN GAS* 🚨\n\n{header}"
+            f"Kadar gas berbahaya terdeteksi! *Kipas otomatis dinyalakan* untuk ventilasi.\n"
+            f"💨 *Gas CO:* {gas_co} PPM"
+        )
+    if state == "SUHU":
+        return (
+            f"🌡️ *INFO SUHU TINGGI*\n\n{header}"
+            f"Suhu ruangan cukup tinggi. Kipas otomatis dinyalakan untuk sirkulasi.\n"
+            f"🌡️ *Suhu:* {suhu} °C"
+        )
+    if state == "INTRUDER":
+        return (
+            f"⚠️ *ALARM KEAMANAN (ANTI-MALING)* ⚠️\n\n{header}"
+            f"Terdeteksi pergerakan mencurigakan saat Mode Siaga aktif!\n"
+            f"🏃 *Status PIR:* Ada Gerakan!"
+        )
+    return None
+
+
+def build_clear_message(previous_state: str, waktu_notif: str) -> Optional[str]:
+    """Pesan 'kondisi kembali normal' saat keluar dari state bahaya/siaga. None kalau nggak perlu dikirim."""
+    if previous_state in ("GAS", "SUHU", "GAS_SUHU", "EMERGENCY"):
+        return f"✅ *INFO SISTEM*\n📅 *Waktu:* {waktu_notif} WIB\nKondisi ruangan kembali normal."
+    if previous_state == "INTRUDER":
+        return f"✅ *INFO KEAMANAN*\n📅 *Waktu:* {waktu_notif} WIB\nTidak ada lagi gerakan terdeteksi."
+    return None
+
 
 
 def render_alur_dt(s, l, g, p, thresh_suhu, thresh_gas):
