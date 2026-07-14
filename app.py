@@ -7,7 +7,10 @@ import pytz
 from streamlit_option_menu import option_menu
 
 from config import FIREBASE_URL, DATASET_PATH
-from utils import kirim_notif_telegram, train_model, render_alur_dt, render_decision_tree_analysis, measure_latency
+from utils import (
+    kirim_notif_telegram, train_model, render_alur_dt, render_decision_tree_analysis,
+    measure_latency, get_alert_state, build_alert_message, build_clear_message
+)
 
 # --- 0. KONFIGURASI HALAMAN ---
 st.set_page_config(layout="wide", page_title="Dashboard Monitoring Room")
@@ -16,8 +19,7 @@ st.set_page_config(layout="wide", page_title="Dashboard Monitoring Room")
 defaults = {
     "thresh_suhu": 30,
     "thresh_gas": 300,
-    "last_alert_kipas": "MATI",
-    "last_alert_maling": False,
+    "last_alert_state": "NONE",  # NONE, SUHU, GAS, GAS_SUHU, INTRUDER, EMERGENCY
     "df_history": pd.DataFrame(columns=["Waktu", "Suhu (°C)", "Kelembapan (%)", "Gas (PPM)", "PIR"]),
 }
 for k, v in defaults.items():
@@ -190,46 +192,47 @@ if menu == "Dashboard Utama":
                 <br>
                 """, unsafe_allow_html=True)
 
-                zona_wib = pytz.timezone('Asia/Jakarta')
-                waktu_notif = datetime.now(zona_wib).strftime('%d-%m-%Y %H:%M:%S')
-
                 if hasil == "NYALA":
-                    st.error("⚠️ Decision Tree C4.5: Kondisi berbahaya terdeteksi — Kipas dinyalakan!")
-                    if st.session_state.last_alert_kipas == "MATI":
-                        kirim_notif_telegram(
-                            f"🚨 *PERINGATAN SISTEM* 🚨\n\n"
-                            f"📅 *Waktu:* {waktu_notif} WIB\n"
-                            f"⚠️ AI C4.5 mendeteksi kondisi berbahaya! *Kipas Otomatis Dinyalakan*.\n"
-                            f"💨 *Gas CO:* {gas_co} PPM\n🌡️ *Suhu:* {suhu} °C"
-                        )
-                        st.session_state.last_alert_kipas = "NYALA"
+                    st.error("⚠️ Decision Tree C4.5: Kipas dinyalakan (gas/suhu/gerakan terdeteksi).")
                     if not mode_simulasi:
                         try: requests.patch(f"{FIREBASE_URL}Control_Perangkat.json", json={"Kipas": "NYALA"}, timeout=3)
                         except Exception: pass
                 else:
-                    st.success("✅ Decision Tree C4.5: Kondisi aman — Kipas dinonaktifkan.")
-                    if st.session_state.last_alert_kipas == "NYALA":
-                        kirim_notif_telegram(
-                            f"✅ *INFO SISTEM*\n📅 *Waktu:* {waktu_notif} WIB\n"
-                            f"Kondisi ruangan kembali normal. Kipas dinonaktifkan."
-                        )
-                        st.session_state.last_alert_kipas = "MATI"
+                    st.success("✅ Kondisi aman — Kipas dinonaktifkan.")
                     if not mode_simulasi:
                         try: requests.patch(f"{FIREBASE_URL}Control_Perangkat.json", json={"Kipas": "MATI"}, timeout=3)
                         except Exception: pass
 
-                if mode_keamanan and gerakan == "Terdeteksi":
-                    st.warning("🚨 Mode Siaga: Gerakan terdeteksi! Buzzer aktif di ESP32.")
-                    if not st.session_state.last_alert_maling:
-                        kirim_notif_telegram(
-                            f"⚠️ *ALARM KEAMANAN (ANTI-MALING)* ⚠️\n\n"
-                            f"📅 *Waktu:* {waktu_notif} WIB\n"
-                            f"Terdeteksi pergerakan mencurigakan saat Mode Siaga aktif!\n"
-                            f"🏃 *Status PIR:* Ada Gerakan!"
-                        )
-                        st.session_state.last_alert_maling = True
-                elif gerakan == "Tidak Terdeteksi":
-                    st.session_state.last_alert_maling = False
+                # --- Logic Notifikasi Bertingkat (Lapis 1: Safety, Lapis 2: Keamanan, Lapis 3: Darurat) ---
+                gas_bahaya = gas_co > st.session_state.thresh_gas
+                suhu_tinggi = suhu > st.session_state.thresh_suhu
+                pir_aktif = gerakan == "Terdeteksi"
+
+                current_state = get_alert_state(gas_bahaya, suhu_tinggi, mode_keamanan, pir_aktif)
+                zona_wib = pytz.timezone('Asia/Jakarta')
+                waktu_notif = datetime.now(zona_wib).strftime('%d-%m-%Y %H:%M:%S')
+
+                if current_state != st.session_state.last_alert_state:
+                    if current_state == "NONE":
+                        pesan = build_clear_message(st.session_state.last_alert_state, waktu_notif)
+                    else:
+                        pesan = build_alert_message(current_state, waktu_notif, suhu, gas_co)
+                    if pesan:
+                        kirim_notif_telegram(pesan)
+                    st.session_state.last_alert_state = current_state
+
+                if current_state == "EMERGENCY":
+                    st.error("🚨🚨 DARURAT: Rumah kosong + gerakan + gas/suhu tidak normal — kemungkinan bahaya serius!")
+                elif current_state == "GAS_SUHU":
+                    st.error("🚨 Gas berbahaya & suhu tinggi terdeteksi bersamaan!")
+                elif current_state == "GAS":
+                    st.error("🚨 Gas berbahaya terdeteksi — kipas otomatis ventilasi.")
+                elif current_state == "SUHU":
+                    st.info("🌡️ Suhu ruangan tinggi — kipas otomatis menyala untuk sirkulasi.")
+                elif current_state == "INTRUDER":
+                    st.warning("⚠️ Mode Siaga: Gerakan terdeteksi! Buzzer aktif di ESP32.")
+                elif pir_aktif and not mode_keamanan:
+                    st.caption("🏃 Ada gerakan terdeteksi — kipas dinyalakan untuk sirkulasi udara (bukan kondisi bahaya).")
 
     # --- Kartu Sensor ---
     st.write("### 📡 Parameter Sensor")
