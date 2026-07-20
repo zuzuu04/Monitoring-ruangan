@@ -165,7 +165,7 @@ if menu == "Dashboard Utama":
 
     with col2:
         with st.container(border=True):
-            st.markdown("### 🧠 Proses Prediksi Decision Tree C4.5")
+            st.markdown("### 🧠 Proses Prediksi Decision Tree")
             render_alur_dt(suhu, kelembapan, gas_co, gerakan,
                             st.session_state.thresh_suhu, st.session_state.thresh_gas)
 
