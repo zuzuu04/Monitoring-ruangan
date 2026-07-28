@@ -15,8 +15,14 @@
 #define DHTTYPE DHT22
 #define MQ135_PIN 34
 #define PIR_PIN 13
-#define RELAY_PIN 26
+#define RELAY_PIN 32
 #define BUZZER_PIN 27
+
+// --- Threshold Alarm ---
+// PENTING: Samakan angka ini dengan slider "Pengaturan" di Streamlit (thresh_gas, thresh_suhu)
+// supaya kondisi kipas (dikontrol AI via Firebase) & buzzer (dikontrol lokal di sini) konsisten.
+#define GAS_THRESHOLD 366
+#define SUHU_THRESHOLD 32.0
 
 DHT dht(DHTPIN, DHTTYPE);
 FirebaseData fbdo;
@@ -40,7 +46,8 @@ void setup() {
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(PIR_PIN, INPUT);
   
-  // Posisi awal: Relay Active LOW (HIGH = MATI)
+  // Posisi awal: Relay Active LOW (LOW = NYALA, HIGH = MATI)
+  // Set HIGH dulu di awal supaya relay dalam kondisi MATI saat boot
   digitalWrite(RELAY_PIN, HIGH); 
   digitalWrite(BUZZER_PIN, LOW);
 
@@ -107,16 +114,36 @@ void loop() {
       }
     }
 
-    // 6. Eksekusi Kontrol Kipas (Relay Aktif LOW)
+    // 6. Eksekusi Kontrol Kipas (Relay Aktif LOW: LOW = NYALA, HIGH = MATI)
     if (statusKipas == "NYALA") {
       digitalWrite(RELAY_PIN, LOW); 
     } else {
       digitalWrite(RELAY_PIN, HIGH);
     }
 
-    // 7. Logika Gabungan Multi-Tone Alarm untuk Buzzer
-    // PRIORITAS 1: Gas Bocor / Asap Pekat (Berdasarkan ambang batas pohon keputusanmu kemarin, misal > 366)
-    if (gas > 366) {
+    // 7. Logika Gabungan Multi-Tier Alarm Buzzer
+    //    Tier 1 (tertinggi) : DARURAT     -> Mode Aman ON + Gerakan + (Gas bahaya ATAU Suhu tinggi) bersamaan
+    //    Tier 2              : Gas Bocor   -> Gas > GAS_THRESHOLD (berlaku kapan saja, prioritas di atas alarm maling biasa)
+    //    Tier 3              : Penyusup    -> Mode Aman ON + Gerakan, TANPA bahaya lingkungan
+    //    Catatan: Suhu tinggi SENDIRIAN (tanpa gerakan+mode aman) sengaja TIDAK membunyikan buzzer,
+    //    cukup kipas menyala + notifikasi di Streamlit, karena suhu tinggi bisa jadi kondisi wajar (siang hari panas).
+    bool gasBahaya    = (gas > GAS_THRESHOLD);
+    bool suhuTinggi   = (suhu > SUHU_THRESHOLD);
+    bool pirAktif     = (motion == HIGH);
+    bool modeAmanOn   = (statusModeAman == "ON");
+
+    if (modeAmanOn && pirAktif && (gasBahaya || suhuTinggi)) {
+      Serial.println("ALARM: DARURAT! Gerakan + Bahaya Lingkungan saat rumah kosong!");
+      // Pola darurat: 3x beep cepat lalu jeda -> beda dari 2 pola lain biar gampang dibedain kupingnya
+      for (int i = 0; i < 3; i++) {
+        digitalWrite(BUZZER_PIN, HIGH);
+        delay(80);
+        digitalWrite(BUZZER_PIN, LOW);
+        delay(80);
+      }
+      delay(300);
+    }
+    else if (gasBahaya) {
       Serial.println("ALARM: Gas Bahaya Terdeteksi!");
       // Bunyi putus-putus cepat (Beep... Beep...)
       digitalWrite(BUZZER_PIN, HIGH);
@@ -124,13 +151,11 @@ void loop() {
       digitalWrite(BUZZER_PIN, LOW);
       delay(150);
     }
-    // PRIORITAS 2: Maling / Penyusup (Hanya berbunyi jika Mode_Aman di Streamlit di-set "ON" DAN ada gerakan)
-    else if (statusModeAman == "ON" && motion == HIGH) {
+    else if (modeAmanOn && pirAktif) {
       Serial.println("ALARM: Penyusup Terdeteksi!");
       // Bunyi konstan panjang menakuti maling (Breeeeeep)
-      digitalWrite(BUZZER_PIN, HIGH); 
+      digitalWrite(BUZZER_PIN, HIGH);
     }
-    // KONDISI AMAN: Matikan Buzzer
     else {
       digitalWrite(BUZZER_PIN, LOW);
     }
