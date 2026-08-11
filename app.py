@@ -193,7 +193,7 @@ if menu == "Dashboard Utama":
                 """, unsafe_allow_html=True)
 
                 if hasil == "NYALA":
-                    st.error("⚠️ Decision Tree C4.5: Kipas dinyalakan (gas/suhu/gerakan terdeteksi).")
+                    st.error("⚠️ Decision Tree: Kipas dinyalakan (gas/suhu/gerakan terdeteksi).")
                     if not mode_simulasi:
                         try: requests.patch(f"{FIREBASE_URL}Control_Perangkat.json", json={"Kipas": "NYALA"}, timeout=3)
                         except Exception: pass
@@ -312,7 +312,7 @@ elif menu == "Statistik Data":
                 st.metric("Akurasi (Holdout Test)", "N/A", help="Dataset terlalu kecil untuk displit train/test.")
 
         if akurasi_holdout is not None and akurasi_holdout >= 0.99:
-            st.caption("⚠️ Akurasi mendekati 100% pada dataset kecil bisa jadi tanda overfitting, bukan berarti model sudah sempurna. Perlu data uji independen yang lebih besar untuk validasi lebih meyakinkan.")
+            st.caption("Tingkat akurasi holdout 100%")
 
         st.divider()
         st.markdown("#### 🔬 Distribusi Parameter Sensor dalam Dataset")
@@ -426,11 +426,11 @@ elif menu == "Status Perangkat":
             st.markdown("""
             | Komponen | Tipe Pin | Nomor Pin |
             |---|---|---|
-            | **DHT11 (Suhu)** | Input | `GPIO 23` |
-            | **MQ135 (Gas)** | Analog | `VP (GPIO 36)` |
-            | **PIR (Motion)**| Digital| `GPIO 19` |
-            | **Relay Kipas** | Output | `GPIO 25` |
-            | **Buzzer** | Output | `GPIO 26` |
+            | **DHT22 (Suhu)** | Input | `GPIO 4` |
+            | **MQ135 (Gas)** | Analog | `VP (GPIO 34)` |
+            | **PIR (Motion)**| Digital| `GPIO 13` |
+            | **Relay Kipas** | Output | `GPIO 32` |
+            | **Buzzer** | Output | `GPIO 27` |
             """)
 
             st.info("Konfigurasi pin dicocokkan dengan skema rangkaian PCB skripsi.")
@@ -439,7 +439,7 @@ elif menu == "Status Perangkat":
             st.markdown("""
             | Komponen | Peran |
             |---|---|
-            | 🧠 **Decision Tree C4.5** | Kontrol **Kipas** |
+            | 🧠 **Decision Tree** | Kontrol **Kipas** |
             | 🛡️ **Rule-based lokal** | Kontrol **Buzzer** |
             """)
             st.caption("Buzzer tetap bunyi walau internet mati (safety layer).")
